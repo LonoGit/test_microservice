@@ -5,6 +5,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/gin-gonic/gin"
 	"github.com/joho/godotenv"
@@ -18,6 +19,7 @@ type Config struct {
 	DBName string
 	DBHost string
 	DBPort string
+	DBURL  string
 
 	DBUser     string
 	DBPassword string
@@ -31,6 +33,11 @@ type User struct {
 
 var db *gorm.DB
 var config Config
+
+const (
+	maxConnectionAttempts = 5
+	timeout               = 2 * time.Second
+)
 
 func init() {
 	if err := godotenv.Load(); err != nil {
@@ -46,27 +53,62 @@ func init() {
 		ServicePort: os.Getenv("SERVICE_PORT"),
 	}
 
-	dsn := fmt.Sprintf("postgres://%s:%s@%s:%s/%s", config.DBUser, config.DBPassword, config.DBHost, config.DBPort, config.DBName)
+	config.DBURL = fmt.Sprintf("postgres://%s:%s@%s:%s/%s", config.DBUser, config.DBPassword, config.DBHost, config.DBPort, config.DBName)
 
-	var err error
-	db, err = gorm.Open(postgres.Open(dsn), &gorm.Config{})
-	if err != nil {
-		log.Fatal("Failed to connect to database")
+	if err := checkDBConnection(); err != nil {
+		log.Println("Failed to connect to the database, the service started without connecting to the database")
+		return
 	}
 
-	db.AutoMigrate(&User{})
+	if err := migrateDB(); err != nil {
+		log.Println("Failed to migrate database")
+	}
 }
 
 func main() {
 	router := gin.Default()
 
-	router.GET("/users", getUsers)
-	router.GET("/users/:id", getUserByID)
-	router.POST("/users", createUser)
-	router.PUT("/users/:id", updateUser)
-	router.DELETE("/users/:id", deleteUser)
+	router.GET("/users", withDBConnection(getUsers))
+	router.GET("/users/:id", withDBConnection(getUserByID))
+	router.POST("/users", withDBConnection(createUser))
+	router.PUT("/users/:id", withDBConnection(updateUser))
+	router.DELETE("/users/:id", withDBConnection(deleteUser))
 
 	router.Run(fmt.Sprintf(":%s", config.ServicePort))
+}
+
+func withDBConnection(handler gin.HandlerFunc) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		var err error
+		if err = checkDBConnection(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Database connection error"})
+			return
+		}
+
+		if err = migrateDB(); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to migrate database"})
+			return
+		}
+
+		handler(c)
+	}
+}
+
+func checkDBConnection() error {
+	var err error
+	for i := 0; i < maxConnectionAttempts; i++ {
+		db, err = gorm.Open(postgres.Open(config.DBURL), &gorm.Config{})
+		if err == nil {
+			return nil
+		}
+		time.Sleep(timeout)
+	}
+
+	return err
+}
+
+func migrateDB() error {
+	return db.AutoMigrate(&User{})
 }
 
 func createUser(c *gin.Context) {
