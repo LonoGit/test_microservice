@@ -61,9 +61,7 @@ func init() {
 		return
 	}
 
-	if err := migrateDB(); err != nil {
-		log.Println("Failed to migrate database")
-	}
+	migrateDB()
 }
 
 func main() {
@@ -83,11 +81,7 @@ func withDBConnection(handler gin.HandlerFunc) gin.HandlerFunc {
 			return
 		}
 
-		if err = migrateDB(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "Failed to migrate database"})
-			return
-		}
-
+		migrateDB()
 		handler(c)
 	}
 }
