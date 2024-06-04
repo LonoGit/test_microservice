@@ -71,6 +71,7 @@ func proxyRequest(url string) gin.HandlerFunc {
 		req, err := http.NewRequest(c.Request.Method, proxyURL, c.Request.Body)
 		if err != nil {
 			log.Println(err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error creating request"})
 		}
 		req.Header = c.Request.Header
 
@@ -78,12 +79,14 @@ func proxyRequest(url string) gin.HandlerFunc {
 		resp, err := client.Do(req)
 		if err != nil {
 			log.Println(err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error making request to service"})
 		}
 		defer resp.Body.Close()
 
 		body, err := ioutil.ReadAll(resp.Body)
 		if err != nil {
 			log.Println(err)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "Error reading response"})
 		}
 
 		// Record logs in the service
